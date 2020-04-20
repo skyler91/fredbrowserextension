@@ -1,0 +1,10 @@
+{
+	"name": "YTMusic",
+	"version":"1.0",
+	"description":"send youtube links to discord",
+	"background": {
+		"scripts": ["background.js"]
+	},
+	"permissions": ["https://discordapp.com/", "contextMenus"],
+	"manifest_version":2
+}
