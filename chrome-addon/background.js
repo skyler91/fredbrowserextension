@@ -6,7 +6,7 @@ function sendToDiscord(url) {
 		linkUrl = slice(0,endIdx);
 	}
 	linkUrl = encodeURI(url.linkUrl);
-	var discordUrl = "https://discordapp.com/api/webhooks/701595157849440256/Q1pbHHU65y9aY0wafWxXzYFTV_c30Q_VwJbUKn3A5rYLAKCH8qS9jI08CH8WkAiJ25No";
+	var discordUrl = "https://discordapp.com/api/webhooks/WEB_HOOK_HERE";
 	var xhr = new XMLHttpRequest();
 	xhr.open("POST", discordUrl,  true);
 	xhr.setRequestHeader("Content-Type", "application/x-www-form-urlencoded");
@@ -20,8 +20,3 @@ chrome.contextMenus.create({
 	"onclick" : sendToDiscord,
 	"documentUrlPatterns":["http://*.youtube.com/", "https://*.youtube.com/", "http://youtube.com/", "https://youtube.com/"]
 });
-
-
-function test() {
-	console.log("test2");
-}
