@@ -72,7 +72,8 @@ def handle_discord():
                 users.document(uid).set({"code": code}, merge=True)
                 break
             getAndStoreUserIdentity(uid)
-            return jsonify(users.document(uid).get().to_dict()), 200
+            return "Authentication successful!", 200
+            #return jsonify(users.document(uid).get().to_dict()), 200
         else :
             raise Exception("no state!")
     except Exception as e:
@@ -130,7 +131,21 @@ def play_music():
         r = requests.post(f"{DISCORD_API_WEBHOOK}/{WEBHOOK_ID}/{WEBHOOK_TOKEN}", headers=headers, data=data)
         return r.text, r.status_code
     except Exception as e:
+        log_message(f"Exception in play_music: {e}")
         return f"An error occurred: {e}"
+
+@app.route('/check_auth', methods=['GET'])
+def check_user_auth():
+    try:
+        userid = request.args.get('uid')
+        log_message(f"userid = {userid}")
+        if userid:
+            userObj = users.document(userid).get().to_dict()
+            if userObj and userObj.get('token') :
+                return jsonify({"auth": "success"}), 200
+        return jsonify({"auth" : "failed"}), 200
+    except Exception as e:
+        return f"Failed to check authentication for {userid}: {e}"
 
 
 @app.route('/discord_view', methods=['GET'])
@@ -182,11 +197,12 @@ def update_todos():
         return f"An error occurred: {e}"
 
 @app.route("/delete", methods=["GET", "DELETE"])
-def delete_todos():
+def delete_users():
     try:
-        todo_id = request.args.get('id')
-        todo_ref.document(todo_id).delete()
-        return jsonify({"success", True}), 200
+        userid = request.args.get('uid')
+        log_message(f"deleting userid {userid}")
+        users.document(userid).delete()
+        return jsonify({"success": True}), 200
     except Exception as e:
         return f"An error occurred: {e}"
 
