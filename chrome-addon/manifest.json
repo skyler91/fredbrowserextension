@@ -5,6 +5,7 @@
 	"background": {
 		"scripts": ["background.js"]
 	},
-	"permissions": ["https://discordapp.com/", "contextMenus"],
+	"permissions": ["https://discordapp.com/", "contextMenus", "tabs", "storage",
+				    "https://flasktest-uaxpuwzs5q-uw.a.run.app/", "http://dockerbuntu/"],
 	"manifest_version":2
 }
