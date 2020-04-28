@@ -1,7 +1,8 @@
 FROM python:3.7-stretch
 
 RUN apt-get update -y
-RUN apt-get install -y python-pip python-dev build-essential
+RUN apt-get install -y python-pip
+#RUN apt-get install -y python-dev build-essential
 
 ENV APP_HOME /app
 WORKDIR $APP_HOME
