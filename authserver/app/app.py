@@ -8,6 +8,9 @@ import random
 import string
 import json
 import urllib.parse
+import time
+import secrets
+import bcrypt
 
 app = Flask(__name__)
 
@@ -15,7 +18,6 @@ app = Flask(__name__)
 cred = credentials.Certificate('key.json')
 default_app = initialize_app(cred)
 db = firestore.client()
-todo_ref = db.collection('todos')
 users = db.collection('users')
 CLIENT_ID = ""
 CLIENT_SECRET = ""
@@ -45,18 +47,50 @@ def hello_world():
 def success_auth():
     return "Successfully authenticated!"
 
-@app.route('/genstate', methods=['GET'])
+@app.route('/register', methods=['POST'])
+def register_user():
+    try:
+        log_message(f"request data: {request.data}")
+        password = request.json['password']
+        log_message(f"password: {password}")
+        pwHash = bcrypt.hashpw(password, bcrypt.gensalt())
+        log_message(f"pwHash: {pwHash}")
+        userid = generateId()
+        log_message(f"userid: {userid}")
+        print(f"user: {str(users.document(userid).get())}")
+        if users.document(userid).get().exists :
+            raise Exception("UID collision!!")
+        users.document(userid).set({"pwhash": pwHash,
+                                    "creationtime": time.time()})
+        return jsonify({"uid": userid, "success": "true"}), 200
+    except Exception as e :
+        log_message(str(e))
+        return f"Failed to register user: {e}", 500
+
+def generateId():
+    return "".join(random.choices(string.ascii_letters + string.digits, k = 16))
+
+@app.route('/genstate', methods=['POST'])
 def generate_state():
     # TODO: VALIDATE UID!!
-    uid = request.args.get('uid')
-    if (uid != None) :
-        state = "".join(random.choices(string.ascii_letters + string.digits, k = 16))
-        # TODO: Dont overrite existing values, just set state
-        users.document(uid).set({"state": state})
-        log_message(f"Created new state {state} for uid {uid}", request.environ['REMOTE_ADDR'])
-        return state, 200
-    else :
-        return "UID value must be set!", 401
+    # TODO: For new user, generate a secret to return with the UID
+    uid = request.json['uid']
+    password = request.json['password']
+    if (uid and password) :
+        if validate_uid_and_password(uid, password) :
+            state = generateId()
+            users.document(uid).set({"state": state}, merge=True)
+            log_message(f"Created new state {state} for uid {uid}", request.environ['REMOTE_ADDR'])
+            return state, 200
+    return "UID value must be set!", 401
+
+def validate_uid_and_password(uid, password):
+    try:
+        userObj = users.document(uid).get(['pwhash']).to_dict()
+        return bcrypt.checkpw(password, userObj['pwhash'])
+    except Exception as e:
+        log_message(f"Failed to validate uid {uid}: {str(e)}")
+    return False
 
 @app.route('/discord', methods=['GET'])
 def handle_discord():
@@ -121,31 +155,46 @@ def play_music():
     #TODO: Validation!!
     try :
         uid = request.json['uid']
-        songUrl = request.json['songurl']
-        userObj = users.document(uid).get().to_dict()
-        data = {"username": userObj['username'],
-                "avatar_url": AVATAR_URL,
-                "content": f"!play {songUrl} [{userObj['discord_id']}]"}
-        headers = {"Content-Type": "application/x-www-form-urlencoded"}
-        log_message(f"Playing song {songUrl} requested by {userObj['username']}")
-        r = requests.post(f"{DISCORD_API_WEBHOOK}/{WEBHOOK_ID}/{WEBHOOK_TOKEN}", headers=headers, data=data)
-        return r.text, r.status_code
+        password = request.json['password']
+        if validate_uid_and_password(uid, password) :
+            songUrl = request.json['songurl']
+            userObj = users.document(uid).get().to_dict()
+            data = {"username": userObj['username'],
+                    "avatar_url": AVATAR_URL,
+                    "content": f"!play {songUrl} [{userObj['discord_id']}]"}
+            headers = {"Content-Type": "application/x-www-form-urlencoded"}
+            log_message(f"Playing song {songUrl} requested by {userObj['username']}")
+            r = requests.post(f"{DISCORD_API_WEBHOOK}/{WEBHOOK_ID}/{WEBHOOK_TOKEN}", headers=headers, data=data)
+            return r.text, r.status_code
+        return "Authentication failed", 401
     except Exception as e:
-        log_message(f"Exception in play_music: {e}")
-        return f"An error occurred: {e}"
+        log_message(f"Exception in play_music: {str(e)}")
+        return f"An error occurred: {e}", 500
 
-@app.route('/check_auth', methods=['GET'])
+@app.route('/check_auth', methods=['POST'])
 def check_user_auth():
     try:
-        userid = request.args.get('uid')
+        userid = request.json['uid']
+        password = request.json['password']
+        reason = "Unknown"
         log_message(f"userid = {userid}")
         if userid:
             userObj = users.document(userid).get().to_dict()
-            if userObj and userObj.get('token') :
-                return jsonify({"auth": "success"}), 200
-        return jsonify({"auth" : "failed"}), 200
+            if userObj :
+                if validate_uid_and_password(userid, password):
+                    if userObj.get('token') :
+                        return jsonify({"auth": "success"}), 200
+                    else :
+                        reason = "Need discord auth"
+                else :
+                    reason = "Invalid username or password"
+            else :
+                reason = "Invalid username or password"
+        else :
+            reason = "UID not specified"
+        return jsonify({"auth" : "failed", "reason": reason}), 200
     except Exception as e:
-        return f"Failed to check authentication for {userid}: {e}"
+        return f"Failed to check authentication for {userid}: {e}", 500
 
 
 @app.route('/discord_view', methods=['GET'])
@@ -165,28 +214,7 @@ def view_discord_all():
     except Exception as e:
         return f"An error occurred: {e}"
 
-@app.route('/add', methods=['POST'])
-def create_todo():
-    try:
-        id = request.json['id']
-        todo_ref.document(id).set(request.json)
-        return jsonify({"success": True}), 200
-    except Exception as e:
-        return f"An error Occurred: {e}"
-
-@app.route("/list", methods=['GET'])
-def read_todos():
-    try:
-        todo_id = request.args.get('id')
-        if todo_id:
-            todo = todo_ref.document(todo_id).get()
-            return jsonify(todo.to_dict()), 200
-        else :
-            all_todos = [doc.to_dict() for doc in todo_ref.stream()]
-            return jsonify(all_todos), 200
-    except Exception as e:
-        return f"An error occurred: {e}"
-
+"""
 @app.route("/update", methods=["POST", "PUT"])
 def update_todos():
     try:
@@ -195,6 +223,7 @@ def update_todos():
         return jsonify({"success": True}), 200
     except Exception as e:
         return f"An error occurred: {e}"
+"""
 
 @app.route("/delete", methods=["GET", "DELETE"])
 def delete_users():
@@ -206,6 +235,16 @@ def delete_users():
     except Exception as e:
         return f"An error occurred: {e}"
 
+"""
+@app.route("/delete_all", methods=["GET"])
+def delete_all():
+    try :
+        docs = users.stream()
+        for doc in docs:
+            users.document(doc.id).delete()
+    except Exception as e:
+        return f"An error occurred: {e}"
+"""
 
 port = int(os.environ.get("PORT", 8080))
 if __name__ == '__main__':

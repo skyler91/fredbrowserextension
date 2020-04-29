@@ -8,7 +8,7 @@ ENV APP_HOME /app
 WORKDIR $APP_HOME
 COPY app ./
 
-RUN pip install Flask firebase_admin requests
+RUN pip install --upgrade Flask firebase_admin requests py-bcrypt
 
 #CMD exec gunicorn --bind :$PORT --workers 1 --threads 8 --timeout 0 app:app
 ENTRYPOINT ["python"]
