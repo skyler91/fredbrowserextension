@@ -1,8 +1,10 @@
 from flask import Flask, request, jsonify
 from firebase_admin import credentials, firestore, initialize_app
+from google.cloud import storage
 from datetime import datetime
 import os
-import sys,traceback
+import sys
+import traceback
 import requests
 import random
 import string
@@ -15,10 +17,11 @@ import bcrypt
 app = Flask(__name__)
 
 # Initialize firestore
-cred = credentials.Certificate('key.json')
-default_app = initialize_app(cred)
+default_app = initialize_app()
 db = firestore.client()
 users = db.collection('users')
+storage_client = storage.Client()
+config_bucket = storage_client.bucket("authserver-config")
 CLIENT_ID = ""
 CLIENT_SECRET = ""
 WEBHOOK_ID = ""
@@ -72,20 +75,19 @@ def generateId():
 
 @app.route('/genstate', methods=['POST'])
 def generate_state():
-    # TODO: VALIDATE UID!!
-    # TODO: For new user, generate a secret to return with the UID
     uid = request.json['uid']
     password = request.json['password']
-    if (uid and password) :
-        if validate_uid_and_password(uid, password) :
-            state = generateId()
-            users.document(uid).set({"state": state}, merge=True)
-            log_message(f"Created new state {state} for uid {uid}", request.environ['REMOTE_ADDR'])
-            return state, 200
-    return "UID value must be set!", 401
+    if validate_uid_and_password(uid, password) :
+        state = generateId()
+        users.document(uid).set({"state": state}, merge=True)
+        log_message(f"Created new state {state} for uid {uid}", request.environ['REMOTE_ADDR'])
+        return state, 200
+    return "Invalid username or password", 401
 
 def validate_uid_and_password(uid, password):
     try:
+        if not uid or not password :
+            return False
         userObj = users.document(uid).get(['pwhash']).to_dict()
         return bcrypt.checkpw(password, userObj['pwhash'])
     except Exception as e:
@@ -107,12 +109,11 @@ def handle_discord():
                 break
             getAndStoreUserIdentity(uid)
             return "Authentication successful!", 200
-            #return jsonify(users.document(uid).get().to_dict()), 200
         else :
             raise Exception("no state!")
     except Exception as e:
         stacktrace = traceback.format_exc()
-        return f"State: {state}, Code: {code}. An error occurred: {e}\n{stacktrace}", 401
+        return f"State: {state}, Code: {code}. An error occurred: {e}\n{stacktrace}", 500
 
 def getAndStoreUserIdentity(uid) :
     # TODO: exception handling here
@@ -201,61 +202,56 @@ def check_user_auth():
 def view_discord_all():
     try:
         userid = request.args.get('uid')
+        cred = request.args.get('cred')
+        if not cred or not bcrypt.checkpw(cred, ADMIN_CRED):
+            return "Missing or invalid credential supplied", 401
         if userid:
             return jsonify(users.document(userid).get().to_dict()), 200
         else :
-            #all_entries = [doc.to_dict() for doc in users.stream()]
             docs = users.stream()
-            #return jsonify(all_entries), 200
             ret = ''
             for doc in docs :
                 ret = ret + u'{} => {}'.format(doc.id, doc.to_dict()) + "<br />"
             return ret, 200
     except Exception as e:
-        return f"An error occurred: {e}"
+        return f"An error occurred: {e}", 500
 
-"""
-@app.route("/update", methods=["POST", "PUT"])
-def update_todos():
-    try:
-        id = request.json['id']
-        todo_ref.document(id).update(request.json)
-        return jsonify({"success": True}), 200
-    except Exception as e:
-        return f"An error occurred: {e}"
-"""
-
-@app.route("/delete", methods=["GET", "DELETE"])
+@app.route("/delete", methods=["POST", "DELETE"])
 def delete_users():
     try:
-        userid = request.args.get('uid')
-        log_message(f"deleting userid {userid}")
-        users.document(userid).delete()
-        return jsonify({"success": True}), 200
+        userid = request.json['uid']
+        password = requests.json['password']
+        if validate_uid_and_password(userid, password):
+            log_message(f"deleting userid {userid}")
+            users.document(userid).delete()
+            return jsonify({"success": True}), 200
+        else :
+            return jsonify({"success": False, "Reason": "Invalid username or password"}), 401
     except Exception as e:
-        return f"An error occurred: {e}"
+        return f"An error occurred: {e}", 500
 
-"""
-@app.route("/delete_all", methods=["GET"])
+@app.route("/delete_all", methods=["POST"])
 def delete_all():
     try :
+        cred = request.json['cred']
+        if not bcrypt.checkpw(cred, ADMIN_CRED) :
+            return "Invalid credentials", 401
         docs = users.stream()
         for doc in docs:
             users.document(doc.id).delete()
     except Exception as e:
-        return f"An error occurred: {e}"
-"""
+        return f"An error occurred: {e}", 500
 
 port = int(os.environ.get("PORT", 8080))
 if __name__ == '__main__':
-    with open('config.json', 'r') as config_file:
-        data = json.load(config_file)
-        CLIENT_ID = data['discord_plugin_client_id']
-        CLIENT_SECRET = data['discord_plugin_client_secret']
-        BASE_URI = data['base_uri']
-        DISCORD_API_URI = data['discord_api_endpoint']
-        DISCORD_API_WEBHOOK = data['discord_api_webhooks']
-        WEBHOOK_ID = data['discord_server_webhook_id']
-        WEBHOOK_TOKEN = data['discord_server_webhook_token']
-        AVATAR_URL = data['avatar_url']
+    config = json.loads(config_bucket.blob("config.json").download_as_string())
+    CLIENT_ID = config['discord_plugin_client_id']
+    CLIENT_SECRET = config['discord_plugin_client_secret']
+    BASE_URI = config['base_uri']
+    DISCORD_API_URI = config['discord_api_endpoint']
+    DISCORD_API_WEBHOOK = config['discord_api_webhooks']
+    WEBHOOK_ID = config['discord_server_webhook_id']
+    WEBHOOK_TOKEN = config['discord_server_webhook_token']
+    AVATAR_URL = config['avatar_url']
+    ADMIN_CRED = config['admin_cred']
     app.run(debug=True, host='0.0.0.0', port=port)
