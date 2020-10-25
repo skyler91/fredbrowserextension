@@ -7,6 +7,7 @@ RUN apt-get install -y python-pip
 ENV APP_HOME /app
 WORKDIR $APP_HOME
 COPY app ./
+ENV GOOGLE_APPLICATION_CREDENTIALS $APP_HOME/key.json
 
 RUN pip install --upgrade Flask firebase_admin requests py-bcrypt
 

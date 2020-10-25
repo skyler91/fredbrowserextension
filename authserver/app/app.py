@@ -1,4 +1,4 @@
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, render_template
 from firebase_admin import credentials, firestore, initialize_app
 from google.cloud import storage
 from datetime import datetime
@@ -49,6 +49,10 @@ def hello_world():
 @app.route('/success')
 def success_auth():
     return "Successfully authenticated!"
+
+@app.route('/privacy')
+def static_privacy():
+    return render_template('privacy.html')
 
 @app.route('/register', methods=['POST'])
 def register_user():
